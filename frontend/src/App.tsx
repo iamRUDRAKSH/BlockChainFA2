@@ -3,7 +3,13 @@ import { BrowserProvider, Contract, type Eip1193Provider, zeroPadValue, toBeArra
 import axios from "axios";
 import { ABI, CONTRACT_ADDRESS } from "./contract";
 
-const API = import.meta.env.VITE_BACKEND_URL || `http://${window.location.hostname}:8000`;
+const DEFAULT_API = (() => {
+  const url = new URL(window.location.origin);
+  url.port = import.meta.env.VITE_BACKEND_PORT || "8000";
+  return url.toString().replace(/\/$/, "");
+})();
+
+const API = (import.meta.env.VITE_BACKEND_URL || DEFAULT_API).replace(/\/$/, "");
 
 declare global {
   interface Window {
