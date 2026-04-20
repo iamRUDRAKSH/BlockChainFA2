@@ -1,13 +1,13 @@
 import { useMemo, useState } from "react";
-import { BrowserProvider, Contract, zeroPadValue, toBeArray } from "ethers";
+import { BrowserProvider, Contract, type Eip1193Provider, zeroPadValue, toBeArray } from "ethers";
 import axios from "axios";
 import { ABI, CONTRACT_ADDRESS } from "./contract";
 
-const API = "http://localhost:8000";
+const API = import.meta.env.VITE_BACKEND_URL || `http://${window.location.hostname}:8000`;
 
 declare global {
   interface Window {
-    ethereum?: unknown;
+    ethereum?: Eip1193Provider;
   }
 }
 
@@ -60,7 +60,7 @@ export default function App() {
       if (!window.ethereum) {
         throw new Error("MetaMask not detected");
       }
-      const provider = new BrowserProvider(window.ethereum as any);
+      const provider = new BrowserProvider(window.ethereum);
       await provider.send("eth_requestAccounts", []);
       const signer = await provider.getSigner();
 
@@ -86,7 +86,7 @@ export default function App() {
       if (!window.ethereum) {
         throw new Error("MetaMask not detected");
       }
-      const provider = new BrowserProvider(window.ethereum as any);
+      const provider = new BrowserProvider(window.ethereum);
       const contract = new Contract(CONTRACT_ADDRESS, ABI, provider);
       const bytes32Hash = zeroPadValue(toBeArray(normalized), 32);
       const result = await contract.verify(bytes32Hash);
@@ -129,7 +129,9 @@ export default function App() {
 
         <section className="panel">
           <h2>Commit a Document</h2>
+          <label htmlFor="document-file">Select file</label>
           <input
+            id="document-file"
             type="file"
             onChange={(e) => setFile(e.target.files?.[0] || null)}
           />
@@ -146,7 +148,9 @@ export default function App() {
 
         <section className="panel">
           <h2>Verify a Hash</h2>
+          <label htmlFor="verify-hash">Document hash</label>
           <input
+            id="verify-hash"
             placeholder="Paste SHA-256 hash"
             value={verifyHash}
             onChange={(e) => setVerifyHash(e.target.value)}

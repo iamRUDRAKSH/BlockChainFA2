@@ -1,4 +1,5 @@
-export const CONTRACT_ADDRESS = "0x008d31f27a48eBedEf1E7C0569c9994059412B72";
+export const CONTRACT_ADDRESS =
+  import.meta.env.VITE_CONTRACT_ADDRESS || "0x0000000000000000000000000000000000000000";
 
 export const ABI = [
   "function commitHash(bytes32 docHash, string calldata ipfsCID) external",
