@@ -17,6 +17,11 @@ declare global {
   }
 }
 
+type InjectedProvider = Eip1193Provider & {
+  isMetaMask?: boolean;
+  providers?: Array<Eip1193Provider & { isMetaMask?: boolean }>;
+};
+
 type VerifyResult = {
   owner: string;
   timestampIso: string;
@@ -30,6 +35,43 @@ function normalizeHash(hash: string): string {
     throw new Error("Hash must be 64 hex characters (SHA-256)");
   }
   return `0x${clean}`;
+}
+
+function getMetaMaskProvider(): Eip1193Provider | null {
+  const injected = window.ethereum as InjectedProvider | undefined;
+  if (!injected) {
+    return null;
+  }
+
+  if (injected.providers?.length) {
+    const metaMask = injected.providers.find((p) => p.isMetaMask);
+    return metaMask || null;
+  }
+
+  if (injected.isMetaMask) {
+    return injected;
+  }
+
+  return injected;
+}
+
+function getFriendlyErrorMessage(error: unknown, fallback: string): string {
+  const rawMessage = error instanceof Error ? error.message : String(error);
+  const normalizedMessage = rawMessage.toLowerCase();
+
+  if (
+    normalizedMessage.includes("hash already committed") ||
+    normalizedMessage.includes("already exists on blockchain") ||
+    normalizedMessage.includes("already committed")
+  ) {
+    return "This document already exists on the blockchain.";
+  }
+
+  return rawMessage || fallback;
+}
+
+function formatDuplicateDocumentMessage(docHashHex: string): string {
+  return `This document already exists on the blockchain. File hash: ${docHashHex}`;
 }
 
 export default function App() {
@@ -55,18 +97,23 @@ export default function App() {
       return;
     }
 
+    let docHashHex = "";
+
     try {
       setStatus("Hashing document...");
       const formData = new FormData();
       formData.append("file", file);
       const { data: hashData } = await axios.post(`${API}/hash`, formData);
-      const docHashHex: string = normalizeHash(hashData.hex);
+      docHashHex = normalizeHash(hashData.hex);
 
       setStatus("Connecting wallet...");
-      if (!window.ethereum) {
-        throw new Error("MetaMask not detected");
+      const injectedProvider = getMetaMaskProvider();
+      if (!injectedProvider) {
+        throw new Error(
+          "MetaMask was not detected. Open this app in Chrome/Brave/Edge with MetaMask installed and enabled for this site.",
+        );
       }
-      const provider = new BrowserProvider(window.ethereum);
+      const provider = new BrowserProvider(injectedProvider);
       await provider.send("eth_requestAccounts", []);
       const signer = await provider.getSigner();
 
@@ -81,7 +128,11 @@ export default function App() {
       setVerifyHash(docHashHex);
       setStatus(`Committed successfully: ${tx.hash}`);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Commit failed";
+      const duplicateMessage =
+        error instanceof Error && error.message.toLowerCase().includes("hash already committed")
+          ? formatDuplicateDocumentMessage(docHashHex)
+          : "";
+      const message = duplicateMessage || getFriendlyErrorMessage(error, "Commit failed");
       setStatus(`Error: ${message}`);
     }
   };
@@ -89,10 +140,13 @@ export default function App() {
   const handleVerify = async () => {
     try {
       const normalized = normalizeHash(verifyHash);
-      if (!window.ethereum) {
-        throw new Error("MetaMask not detected");
+      const injectedProvider = getMetaMaskProvider();
+      if (!injectedProvider) {
+        throw new Error(
+          "MetaMask was not detected. Open this app in Chrome/Brave/Edge with MetaMask installed and enabled for this site.",
+        );
       }
-      const provider = new BrowserProvider(window.ethereum);
+      const provider = new BrowserProvider(injectedProvider);
       const contract = new Contract(CONTRACT_ADDRESS, ABI, provider);
       const bytes32Hash = zeroPadValue(toBeArray(normalized), 32);
       const result = await contract.verify(bytes32Hash);
@@ -106,7 +160,7 @@ export default function App() {
       setStatus("Verification succeeded.");
     } catch (error) {
       setVerifyResult(null);
-      const message = error instanceof Error ? error.message : "Verify failed";
+      const message = getFriendlyErrorMessage(error, "Verify failed");
       setStatus(`Error: ${message}`);
     }
   };
