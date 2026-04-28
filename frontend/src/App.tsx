@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { BrowserProvider, Contract, type Eip1193Provider, zeroPadValue, toBeArray } from "ethers";
 import axios from "axios";
 import { ABI, CONTRACT_ADDRESS } from "./contract";
+import History from "./History";
 
 const DEFAULT_API = (() => {
   const url = new URL(window.location.origin);
@@ -75,12 +76,15 @@ function formatDuplicateDocumentMessage(docHashHex: string): string {
 }
 
 export default function App() {
+  const [activeTab, setActiveTab] = useState<"commit" | "verify" | "history">("commit");
   const [file, setFile] = useState<File | null>(null);
   const [status, setStatus] = useState("Ready.");
   const [txHash, setTxHash] = useState("");
   const [lastCommittedHash, setLastCommittedHash] = useState("");
   const [verifyHash, setVerifyHash] = useState("");
   const [verifyResult, setVerifyResult] = useState<VerifyResult | null>(null);
+  const [uploadingToIPFS, setUploadingToIPFS] = useState(false);
+  const [ipfsCID, setIpfsCID] = useState("");
 
   const etherscanTxUrl = useMemo(
     () => (txHash ? `https://sepolia.etherscan.io/tx/${txHash}` : ""),
@@ -96,15 +100,18 @@ export default function App() {
       setStatus("Set CONTRACT_ADDRESS in src/contract.ts first.");
       return;
     }
-
     let docHashHex = "";
+    let cid = "";
 
     try {
-      setStatus("Hashing document...");
+      setStatus("Uploading to IPFS...");
+      setUploadingToIPFS(true);
       const formData = new FormData();
       formData.append("file", file);
-      const { data: hashData } = await axios.post(`${API}/hash`, formData);
-      docHashHex = normalizeHash(hashData.hex);
+      const { data: ipfsData } = await axios.post(`${API}/upload-to-ipfs`, formData);
+      docHashHex = normalizeHash(ipfsData.hex);
+      cid = ipfsData.cid || "";
+      setIpfsCID(cid);
 
       setStatus("Connecting wallet...");
       const injectedProvider = getMetaMaskProvider();
@@ -120,7 +127,7 @@ export default function App() {
       setStatus("Committing to blockchain...");
       const contract = new Contract(CONTRACT_ADDRESS, ABI, signer);
       const bytes32Hash = zeroPadValue(toBeArray(docHashHex), 32);
-      const tx = await contract.commitHash(bytes32Hash, "");
+      const tx = await contract.commitHash(bytes32Hash, cid);
       await tx.wait();
 
       setTxHash(tx.hash);
@@ -134,6 +141,8 @@ export default function App() {
           : "";
       const message = duplicateMessage || getFriendlyErrorMessage(error, "Commit failed");
       setStatus(`Error: ${message}`);
+    } finally {
+        setUploadingToIPFS(false);
     }
   };
 
@@ -185,51 +194,111 @@ export default function App() {
       <div className="backdrop" />
       <main className="card">
         <h1>Academic IP Timestamper</h1>
-        <p className="subtitle">Hash to commit on Sepolia, then verify and download receipt.</p>
+        <p className="subtitle">Upload files to IPFS, commit on Sepolia, verify and download receipts.</p>
 
-        <section className="panel">
-          <h2>Commit a Document</h2>
-          <label htmlFor="document-file">Select file</label>
-          <input
-            id="document-file"
-            type="file"
-            onChange={(e) => setFile(e.target.files?.[0] || null)}
-          />
-          <button type="button" onClick={handleCommit}>
-            Hash + Commit
+        <div style={{ display: "flex", gap: "8px", marginBottom: "1rem", borderBottom: "1px solid #ccc", paddingBottom: "8px" }}>
+          <button
+            type="button"
+            onClick={() => setActiveTab("commit")}
+            style={{
+              padding: "8px 16px",
+              background: activeTab === "commit" ? "#007bff" : "#ccc",
+              color: activeTab === "commit" ? "white" : "black",
+              border: "none",
+              borderRadius: "4px",
+              cursor: "pointer",
+              fontWeight: activeTab === "commit" ? "bold" : "normal",
+            }}
+          >
+            Upload & Commit
           </button>
-          {lastCommittedHash && <p>Last hash: {lastCommittedHash}</p>}
-          {txHash && (
-            <p>
-              Tx: <a href={etherscanTxUrl} target="_blank" rel="noreferrer">{txHash}</a>
-            </p>
-          )}
-        </section>
+          <button
+            type="button"
+            onClick={() => setActiveTab("verify")}
+            style={{
+              padding: "8px 16px",
+              background: activeTab === "verify" ? "#007bff" : "#ccc",
+              color: activeTab === "verify" ? "white" : "black",
+              border: "none",
+              borderRadius: "4px",
+              cursor: "pointer",
+              fontWeight: activeTab === "verify" ? "bold" : "normal",
+            }}
+          >
+            Verify
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("history")}
+            style={{
+              padding: "8px 16px",
+              background: activeTab === "history" ? "#007bff" : "#ccc",
+              color: activeTab === "history" ? "white" : "black",
+              border: "none",
+              borderRadius: "4px",
+              cursor: "pointer",
+              fontWeight: activeTab === "history" ? "bold" : "normal",
+            }}
+          >
+            History
+          </button>
+        </div>
 
-        <section className="panel">
-          <h2>Verify a Hash</h2>
-          <label htmlFor="verify-hash">Document hash</label>
-          <input
-            id="verify-hash"
-            placeholder="Paste SHA-256 hash"
-            value={verifyHash}
-            onChange={(e) => setVerifyHash(e.target.value)}
-          />
-          <div className="row">
-            <button type="button" onClick={handleVerify}>
-              Verify
+        {activeTab === "commit" && (
+          <section className="panel">
+            <h2>Upload & Commit a Document</h2>
+            <label htmlFor="document-file">Select file</label>
+            <input
+              id="document-file"
+              type="file"
+              onChange={(e) => setFile(e.target.files?.[0] || null)}
+              disabled={uploadingToIPFS}
+            />
+            <button type="button" onClick={handleCommit} disabled={uploadingToIPFS}>
+              {uploadingToIPFS ? "Uploading..." : "Upload to IPFS & Commit"}
             </button>
-            <button type="button" onClick={downloadReceipt}>
-              Download Receipt
-            </button>
-          </div>
+            {lastCommittedHash && <p>Last hash: {lastCommittedHash}</p>}
+            {ipfsCID && (
+              <p>
+                IPFS CID: <code style={{ fontSize: "0.85rem" }}>{ipfsCID}</code>
+              </p>
+            )}
+            {txHash && (
+              <p>
+                Tx: <a href={etherscanTxUrl} target="_blank" rel="noreferrer">{txHash}</a>
+              </p>
+            )}
+          </section>
+        )}
 
-          {verifyResult && (
-            <pre>
+        {activeTab === "verify" && (
+          <section className="panel">
+            <h2>Verify a Hash</h2>
+            <label htmlFor="verify-hash">Document hash</label>
+            <input
+              id="verify-hash"
+              placeholder="Paste SHA-256 hash"
+              value={verifyHash}
+              onChange={(e) => setVerifyHash(e.target.value)}
+            />
+            <div className="row">
+              <button type="button" onClick={handleVerify}>
+                Verify
+              </button>
+              <button type="button" onClick={downloadReceipt}>
+                Download Receipt
+              </button>
+            </div>
+
+            {verifyResult && (
+              <pre>
 {JSON.stringify(verifyResult, null, 2)}
-            </pre>
-          )}
-        </section>
+              </pre>
+            )}
+          </section>
+        )}
+
+        {activeTab === "history" && <History />}
 
         <p className="status">{status}</p>
       </main>

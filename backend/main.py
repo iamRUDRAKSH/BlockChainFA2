@@ -6,6 +6,7 @@ from fastapi.responses import Response
 
 from backend.services.hasher import build_merkle_root, sha256_file
 from backend.services.receipt import generate_receipt
+from backend.services.ipfs import upload_to_web3_storage
 
 app = FastAPI()
 
@@ -46,6 +47,30 @@ async def hash_document(file: UploadFile = File(...)):
 async def merkle_root(hashes: list[str]):
     root = build_merkle_root(hashes)
     return {"merkle_root": root, "hex": "0x" + root}
+
+
+@app.post("/upload-to-ipfs")
+async def upload_ipfs(file: UploadFile = File(...)):
+    """
+    Upload file to web3.storage and return CID.
+    Also returns file hash.
+    """
+    content = await file.read()
+    cid = await upload_to_web3_storage(content, file.filename or "file")
+    doc_hash = sha256_file(content)
+    
+    return {
+        "hash": doc_hash,
+        "hex": "0x" + doc_hash,
+        "cid": cid,
+        "success": cid is not None,
+    }
+
+
+@app.get("/health")
+async def health():
+    """Health check endpoint."""
+    return {"status": "ok"}
 
 
 @app.get("/receipt")
